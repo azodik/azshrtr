@@ -6,6 +6,7 @@ Laravel 13 · PHP 8.5+ · React console · MariaDB · OpenAPI
 
 **By [Azodik Consulting Private Limited](https://azodik.com)** · [github.com/azodik/azshrtr](https://github.com/azodik/azshrtr)
 
+[![CI](https://github.com/azodik/azshrtr/actions/workflows/main.yml/badge.svg)](https://github.com/azodik/azshrtr/actions/workflows/main.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0B6E6E.svg)](LICENSE)
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/azodik)
 
