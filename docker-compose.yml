@@ -1,0 +1,84 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AZSHRTR_VERSION: ${AZSHRTR_VERSION:-0.0.1}
+        AZSHRTR_BUILD: ${AZSHRTR_BUILD:-1}
+        AZSHRTR_COMMIT: ${AZSHRTR_COMMIT:-dev}
+    image: azshrtr:local
+    ports:
+      - "8080:80"
+    environment:
+      APP_NAME: Azshrtr
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      APP_FORCE_URL: "true"
+      APP_KEY: ${APP_KEY:?Set APP_KEY in .env (php artisan key:generate)}
+      AZSHRTR_SEED: ${AZSHRTR_SEED:-false}
+      NIGHTWATCH_ENABLED: "false"
+      DB_CONNECTION: mariadb
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_DATABASE: azshrtr
+      DB_USERNAME: azshrtr
+      DB_PASSWORD: azshrtr
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      SESSION_ENCRYPT: "true"
+      SESSION_SECURE_COOKIE: "false"
+      LOG_CHANNEL: stderr
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./storage:/var/www/html/storage
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MYSQL_DATABASE: azshrtr
+      MYSQL_USER: azshrtr
+      MYSQL_PASSWORD: azshrtr
+      MYSQL_ROOT_PASSWORD: azshrtr
+    ports:
+      - "3307:3306"
+    volumes:
+      - azshrtr_mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", ""]
+    ports:
+      - "6381:6379"
+    volumes:
+      - azshrtr_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  azshrtr_mariadb:
+  azshrtr_redis:

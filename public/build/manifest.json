@@ -1,0 +1,94 @@
+{
+  "_dm-sans-400-normal-BwCSEQnW.woff": {
+    "file": "assets/dm-sans-400-normal-BwCSEQnW.woff",
+    "src": "_dm-sans-400-normal-BwCSEQnW.woff"
+  },
+  "_dm-sans-400-normal-CW0RaeGs.woff2": {
+    "file": "assets/dm-sans-400-normal-CW0RaeGs.woff2",
+    "src": "_dm-sans-400-normal-CW0RaeGs.woff2"
+  },
+  "_dm-sans-500-normal-B9HHJjqV.woff2": {
+    "file": "assets/dm-sans-500-normal-B9HHJjqV.woff2",
+    "src": "_dm-sans-500-normal-B9HHJjqV.woff2"
+  },
+  "_dm-sans-500-normal-Dr3UlScf.woff": {
+    "file": "assets/dm-sans-500-normal-Dr3UlScf.woff",
+    "src": "_dm-sans-500-normal-Dr3UlScf.woff"
+  },
+  "_dm-sans-600-normal-Aqo67rzb.woff2": {
+    "file": "assets/dm-sans-600-normal-Aqo67rzb.woff2",
+    "src": "_dm-sans-600-normal-Aqo67rzb.woff2"
+  },
+  "_dm-sans-600-normal-BmdmIIQ2.woff": {
+    "file": "assets/dm-sans-600-normal-BmdmIIQ2.woff",
+    "src": "_dm-sans-600-normal-BmdmIIQ2.woff"
+  },
+  "_dm-sans-700-normal-CUSSCpQX.woff": {
+    "file": "assets/dm-sans-700-normal-CUSSCpQX.woff",
+    "src": "_dm-sans-700-normal-CUSSCpQX.woff"
+  },
+  "_dm-sans-700-normal-DvUfVpUG.woff2": {
+    "file": "assets/dm-sans-700-normal-DvUfVpUG.woff2",
+    "src": "_dm-sans-700-normal-DvUfVpUG.woff2"
+  },
+  "_fonts-DagH8vuw.css": {
+    "file": "assets/fonts-DagH8vuw.css",
+    "src": "_fonts-DagH8vuw.css"
+  },
+  "_syne-500-normal-DR6mUQpY.woff": {
+    "file": "assets/syne-500-normal-DR6mUQpY.woff",
+    "src": "_syne-500-normal-DR6mUQpY.woff"
+  },
+  "_syne-500-normal-emxikWQ7.woff2": {
+    "file": "assets/syne-500-normal-emxikWQ7.woff2",
+    "src": "_syne-500-normal-emxikWQ7.woff2"
+  },
+  "_syne-600-normal-BiwQbQXw.woff2": {
+    "file": "assets/syne-600-normal-BiwQbQXw.woff2",
+    "src": "_syne-600-normal-BiwQbQXw.woff2"
+  },
+  "_syne-600-normal-dRu9QuIh.woff": {
+    "file": "assets/syne-600-normal-dRu9QuIh.woff",
+    "src": "_syne-600-normal-dRu9QuIh.woff"
+  },
+  "_syne-700-normal-AF3Rs61n.woff2": {
+    "file": "assets/syne-700-normal-AF3Rs61n.woff2",
+    "src": "_syne-700-normal-AF3Rs61n.woff2"
+  },
+  "_syne-700-normal-Cd-_iCn5.woff": {
+    "file": "assets/syne-700-normal-Cd-_iCn5.woff",
+    "src": "_syne-700-normal-Cd-_iCn5.woff"
+  },
+  "_syne-800-normal-BuJcbPcX.woff": {
+    "file": "assets/syne-800-normal-BuJcbPcX.woff",
+    "src": "_syne-800-normal-BuJcbPcX.woff"
+  },
+  "_syne-800-normal-EehdNYzx.woff2": {
+    "file": "assets/syne-800-normal-EehdNYzx.woff2",
+    "src": "_syne-800-normal-EehdNYzx.woff2"
+  },
+  "resources/css/app.css": {
+    "file": "assets/app-C4JlOV1-.css",
+    "name": "app",
+    "names": [
+      "app.css"
+    ],
+    "src": "resources/css/app.css",
+    "isEntry": true
+  },
+  "resources/js/app.js": {
+    "file": "assets/app-BW02pqB4.js",
+    "name": "app",
+    "src": "resources/js/app.js",
+    "isEntry": true
+  },
+  "resources/js/console/main.tsx": {
+    "file": "assets/main-mKRR_Sp4.js",
+    "name": "main",
+    "src": "resources/js/console/main.tsx",
+    "isEntry": true,
+    "css": [
+      "assets/main-Chw94eNX.css"
+    ]
+  }
+}

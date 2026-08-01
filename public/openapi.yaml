@@ -1,0 +1,2983 @@
+openapi: 3.1.0
+info:
+  title: Azshrtr API
+  version: 1.0.0
+  summary: URL shortener and QR platform API
+  description: 'Two authentication modes and clear tag groups in the explorer.
+
+
+    **1. Product API (Bearer API key)** — tags under *Product API*
+
+    `Authorization: Bearer az_live_…` or `az_test_…`
+
+    Org context always comes from the key (never a path you can swap to another workspace).
+
+
+    **2. Console session (cookie)** — Auth + Workspace + Links tags
+
+    Sanctum cookie after login. Mutations need CSRF (`X-XSRF-TOKEN` / `X-CSRF-TOKEN`).
+
+    API keys do **not** work on these routes.
+
+
+    **Roles (console):** Owner manages billing; Owner/Admin manage members & API keys; Members can work
+    with links/QR/domains/analytics.
+
+
+    Interactive explorer: `/docs/api-explorer`. Spec: `/openapi.yaml`.
+
+    '
+  contact:
+    name: Azodik Consulting Private Limited
+    url: https://azodik.com
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+- url: https://azshrtr.test
+  description: Local (Herd) — https://azshrtr.test
+- url: http://localhost:8080
+  description: Local (Docker Compose) — http://localhost:8080
+- url: https://azshrtr.com
+  description: Production — https://azshrtr.com
+- url: '{baseUrl}'
+  description: Custom deployed instance
+  variables:
+    baseUrl:
+      default: https://azshrtr.com
+      description: Application root URL (no trailing slash)
+security: []
+tags:
+- name: Health
+  description: Public liveness and dependency checks.
+- name: Product Me
+  description: 'Bearer API key: current organization, plan, and usage.'
+- name: Product Links
+  description: 'Bearer API key: short-link CRUD and click listings.'
+- name: Auth Session
+  description: Register, login, logout, profile, password, and session helpers (cookie + CSRF for signed-in
+    routes).
+- name: Auth MFA
+  description: TOTP authenticator setup, challenge, recovery codes, and disable.
+- name: Auth Email OTP
+  description: Email one-time codes as an alternate second factor at sign-in.
+- name: Auth Passkeys
+  description: WebAuthn passkey registration and passwordless login.
+- name: Auth Email
+  description: Email verification and resend confirmation.
+- name: Organizations
+  description: Create and list workspaces the signed-in user belongs to.
+- name: Members
+  description: Team roster, invites, roles, and removals (Owner/Admin for mutations).
+- name: Console Links
+  description: Console short-link management for a workspace.
+- name: QR Codes
+  description: Generate, list, download, and delete QR codes.
+- name: Domains
+  description: Custom domain add, verify, and DNS records.
+- name: API Keys
+  description: Create and revoke product API keys (Owner/Admin).
+- name: Analytics
+  description: Workspace overview and click analytics.
+- name: API Logs
+  description: Product API request logs for the workspace.
+- name: Audit Logs
+  description: Workspace audit trail (retention follows plan).
+- name: Billing
+  description: Plan, invoices, checkout, cancel, and resume. Pro is granted only via verified webhooks.
+- name: Import Export
+  description: Bulk import and export of short links.
+- name: Webhooks
+  description: Provider webhook receivers (Dodo Payments).
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: az_live_|az_test_
+      description: 'Organization API key for the Product API (`/api/v1/me`, `/api/v1/links`, …). Send
+        as `Authorization: Bearer az_live_…` or `az_test_…`. Scopes: links:read, links:write, qr:write,
+        domains:read, analytics:read.'
+    ConsoleSession:
+      type: apiKey
+      in: cookie
+      name: azshrtr_session
+      description: 'Laravel Sanctum SPA/session cookie used by the React console after login.
+
+        Not an API key. Pair with CSRF (`X-XSRF-TOKEN` / `X-CSRF-TOKEN`) on unsafe methods.
+
+        Required for `/api/v1/auth/me`, org console routes, billing, members, etc.
+
+        '
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LinkId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConsoleLinkId:
+      name: linkId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    SearchQ:
+      name: q
+      in: query
+      schema:
+        type: string
+    ExportFormat:
+      name: format
+      in: query
+      schema:
+        type: string
+        enum:
+        - csv
+        - json
+        default: csv
+  schemas:
+    ErrorMessage:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    HealthStatus:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        service:
+          type: string
+        checks:
+          type: object
+          properties:
+            database:
+              type: object
+              properties:
+                ok:
+                  type: boolean
+                error:
+                  type: string
+                  description: Present only when APP_DEBUG is true and the check failed
+              required:
+              - ok
+          required:
+          - database
+      required:
+      - ok
+      - service
+      - checks
+    Ok:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
+    Link:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+          nullable: true
+        domain_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        destination_url:
+          type: string
+          format: uri
+        title:
+          type: string
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_disabled:
+          type: boolean
+        is_anonymous:
+          type: boolean
+        click_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LinkCreate:
+      type: object
+      required:
+      - destination_url
+      properties:
+        destination_url:
+          type: string
+          maxLength: 2048
+        title:
+          type: string
+          maxLength: 255
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        password:
+          type: string
+          maxLength: 128
+          nullable: true
+        domain_id:
+          type: string
+          format: uuid
+          nullable: true
+    LinkUpdate:
+      type: object
+      properties:
+        destination_url:
+          type: string
+          maxLength: 2048
+        title:
+          type: string
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        password:
+          type: string
+          nullable: true
+        is_disabled:
+          type: boolean
+    LinkEnvelope:
+      type: object
+      required:
+      - link
+      properties:
+        link:
+          $ref: '#/components/schemas/Link'
+    PaginatedLinks:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+    ProductMe:
+      type: object
+      properties:
+        organization:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            slug:
+              type: string
+        plan:
+          type: object
+          properties:
+            slug:
+              type: string
+            name:
+              type: string
+        usage:
+          type: object
+          properties:
+            period:
+              type: string
+            links_created:
+              type: integer
+            qr_generated:
+              type: integer
+            api_calls:
+              type: integer
+    AuthUser:
+      type: object
+      required:
+      - id
+      - name
+      - email
+      - mfa_enabled
+      - organizations
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Ada Lovelace
+        email:
+          type: string
+          format: email
+          example: ada@example.com
+        email_verified_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          example: '2026-08-01T10:00:00+00:00'
+        theme_preference:
+          type: string
+          enum:
+          - light
+          - dark
+          - system
+          example: system
+        preferred_locale:
+          type:
+          - string
+          - 'null'
+          example: en
+        mfa_enabled:
+          type: boolean
+          example: false
+        organizations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+                example: Ada's workspace
+              slug:
+                type: string
+                example: adas-workspace
+              role:
+                type: string
+                enum:
+                - owner
+                - admin
+                - member
+                example: owner
+    AuthPayload:
+      type: object
+      required:
+      - user
+      - csrf_token
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        csrf_token:
+          type: string
+          description: Laravel CSRF token for subsequent cookie-session requests
+          example: xK9mZ2pQ…
+      example:
+        user:
+          id: 0198a1b2-c3d4-7000-8000-000000000001
+          name: Ada Lovelace
+          email: ada@example.com
+          email_verified_at: '2026-08-01T10:00:00+00:00'
+          theme_preference: system
+          preferred_locale: en
+          mfa_enabled: false
+          organizations:
+          - id: 0198a1b2-c3d4-7000-8000-0000000000aa
+            name: Ada's workspace
+            slug: adas-workspace
+            role: owner
+        csrf_token: xK9mZ2pQ…
+    MessageResponse:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          type: string
+      example:
+        message: OK
+    MfaRequiredResponse:
+      type: object
+      required:
+      - mfa_required
+      - message
+      properties:
+        mfa_required:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Enter your authenticator or recovery code to continue.
+    MfaStatusResponse:
+      type: object
+      properties:
+        mfa_enabled:
+          type: boolean
+          example: true
+        mfa_confirmed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          example: '2026-07-15T08:30:00+00:00'
+        recovery_codes_remaining:
+          type: integer
+          example: 8
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+    BulkDelete:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+    BulkDeleteResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        deleted:
+          type: integer
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+    Unprocessable:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+paths:
+  /api/v1/health:
+    get:
+      tags:
+      - Health
+      operationId: getHealth
+      summary: Health check
+      description: 'Liveness and dependency probe. Returns `200` when the app and MariaDB
+
+        (configured database connection) are reachable; `503` when the database check fails.
+
+        '
+      security: []
+      responses:
+        200:
+          description: Service and database are up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                ok: true
+                service: azshrtr
+                checks:
+                  database:
+                    ok: true
+        503:
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                ok: false
+                service: azshrtr
+                checks:
+                  database:
+                    ok: false
+  /api/v1/me:
+    get:
+      tags:
+      - Product Me
+      operationId: productMe
+      summary: Organization, plan, and usage for the API key
+      security:
+      - ApiKeyAuth: []
+      responses:
+        200:
+          description: Current organization context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductMe'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+      description: Organization, plan, and usage for the API key. Tagged under **Product Me**. See request/response
+        schemas below.
+  /api/v1/links:
+    get:
+      tags:
+      - Product Links
+      operationId: productListLinks
+      summary: List links for the API key organization
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        200:
+          description: Paginated links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLinks'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+      description: List links for the API key organization. Tagged under **Product Links**. See request/response
+        schemas below.
+    post:
+      tags:
+      - Product Links
+      operationId: productCreateLink
+      summary: Create a short link
+      security:
+      - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkCreate'
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Create a short link. Tagged under **Product Links**. See request/response schemas below.
+  /api/v1/links/{id}:
+    get:
+      tags:
+      - Product Links
+      operationId: productShowLink
+      summary: Show a link
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/LinkId'
+      responses:
+        200:
+          description: Link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+        404:
+          $ref: '#/components/responses/NotFound'
+      description: Show a link. Tagged under **Product Links**. See request/response schemas below.
+    patch:
+      tags:
+      - Product Links
+      operationId: productUpdateLink
+      summary: Update a link
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/LinkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkUpdate'
+      responses:
+        200:
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Update a link. Tagged under **Product Links**. See request/response schemas below.
+    delete:
+      tags:
+      - Product Links
+      operationId: productDeleteLink
+      summary: Delete a link
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/LinkId'
+      responses:
+        200:
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+      description: Delete a link. Tagged under **Product Links**. See request/response schemas below.
+  /api/v1/links/{id}/clicks:
+    get:
+      tags:
+      - Product Links
+      operationId: productLinkClicks
+      summary: Paginated click analytics for a link
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/LinkId'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        200:
+          description: Paginated clicks
+        403:
+          $ref: '#/components/responses/Forbidden'
+      description: Paginated click analytics for a link. Tagged under **Product Links**. See request/response
+        schemas below.
+  /api/v1/webhooks/dodo:
+    post:
+      tags:
+      - Webhooks
+      operationId: dodoWebhook
+      summary: Dodo Payments webhook receiver
+      security: []
+      description: HMAC-verified when DODO_PAYMENTS_WEBHOOK_SECRET is set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        200:
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+        401:
+          description: Invalid signature
+  /api/v1/auth/register:
+    post:
+      tags:
+      - Auth Session
+      operationId: authRegister
+      summary: Register a user and default organization
+      description: 'Console browser-session endpoint. Creates the user, a default organization,
+
+        starts a Sanctum cookie session, and emails an email-verification code.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - email
+              - password
+              - password_confirmation
+              - accepted_terms
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                  example: Ada Lovelace
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                password:
+                  type: string
+                  format: password
+                  example: correct-horse-battery-staple
+                password_confirmation:
+                  type: string
+                  format: password
+                  example: correct-horse-battery-staple
+                accepted_terms:
+                  type: boolean
+                  example: true
+                preferred_locale:
+                  type: string
+                  enum:
+                  - en
+                  - es
+                  - fr
+                  - de
+                  - hi
+                  example: en
+            example:
+              name: Ada Lovelace
+              email: ada@example.com
+              password: correct-horse-battery-staple
+              password_confirmation: correct-horse-battery-staple
+              accepted_terms: true
+              preferred_locale: en
+      responses:
+        201:
+          description: Registered and signed in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPayload'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/auth/login:
+    post:
+      tags:
+      - Auth Session
+      operationId: authLogin
+      summary: Sign in with email and password
+      description: 'Returns `AuthPayload` when MFA is off. If MFA is enabled, returns
+
+        `mfa_required: true` and no session cookie until `/auth/mfa/challenge` succeeds.
+
+        '
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                password:
+                  type: string
+                  format: password
+                  example: correct-horse-battery-staple
+                remember:
+                  type: boolean
+                  example: true
+                preferred_locale:
+                  type: string
+                  example: en
+            example:
+              email: ada@example.com
+              password: correct-horse-battery-staple
+              remember: true
+      responses:
+        200:
+          description: Signed in, or MFA challenge required
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/AuthPayload'
+                - $ref: '#/components/schemas/MfaRequiredResponse'
+              examples:
+                signed_in:
+                  summary: MFA off — session started
+                  value:
+                    user:
+                      id: 0198a1b2-c3d4-7000-8000-000000000001
+                      name: Ada Lovelace
+                      email: ada@example.com
+                      email_verified_at: '2026-08-01T10:00:00+00:00'
+                      theme_preference: system
+                      preferred_locale: en
+                      mfa_enabled: false
+                      organizations:
+                      - id: 0198a1b2-c3d4-7000-8000-0000000000aa
+                        name: Ada's workspace
+                        slug: adas-workspace
+                        role: owner
+                    csrf_token: xK9mZ2pQ…
+                mfa_required:
+                  summary: MFA enabled — complete challenge next
+                  value:
+                    mfa_required: true
+                    message: Enter your authenticator or recovery code to continue.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - Auth Session
+      operationId: authLogout
+      summary: Sign out
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Session invalidated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+              example:
+                ok: true
+      description: Sign out. Tagged under **Auth Session**. See request/response schemas below.
+  /api/v1/auth/me:
+    get:
+      tags:
+      - Auth Session
+      operationId: authMe
+      summary: Current session user
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Current user and CSRF token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPayload'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: Current session user. Tagged under **Auth Session**. See request/response schemas below.
+  /api/v1/auth/profile:
+    patch:
+      tags:
+      - Auth Session
+      operationId: authUpdateProfile
+      summary: Update profile fields
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                  example: Ada Lovelace
+                preferred_locale:
+                  type: string
+                  enum:
+                  - en
+                  - es
+                  - fr
+                  - de
+                  - hi
+                  example: en
+                theme_preference:
+                  type: string
+                  enum:
+                  - light
+                  - dark
+                  - system
+                  example: dark
+            example:
+              name: Ada Lovelace
+              preferred_locale: en
+              theme_preference: dark
+      responses:
+        200:
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPayload'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Update profile fields. Tagged under **Auth Session**. See request/response schemas
+        below.
+  /api/v1/auth/password:
+    put:
+      tags:
+      - Auth Session
+      operationId: authUpdatePassword
+      summary: Change password
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - current_password
+              - password
+              - password_confirmation
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                  example: old-password-here
+                password:
+                  type: string
+                  format: password
+                  example: new-correct-horse-battery
+                password_confirmation:
+                  type: string
+                  format: password
+                  example: new-correct-horse-battery
+            example:
+              current_password: old-password-here
+              password: new-correct-horse-battery
+              password_confirmation: new-correct-horse-battery
+      responses:
+        200:
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Password updated.
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Change password. Tagged under **Auth Session**. See request/response schemas below.
+  /api/v1/auth/forgot-password:
+    post:
+      tags:
+      - Auth Session
+      operationId: authForgotPassword
+      summary: Request password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                preferred_locale:
+                  type: string
+                  example: en
+            example:
+              email: ada@example.com
+      responses:
+        200:
+          description: Always OK (does not reveal whether the email exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: If that email exists, a reset link was sent.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Request password reset email. Tagged under **Auth Session**. See request/response schemas
+        below.
+  /api/v1/auth/reset-password:
+    post:
+      tags:
+      - Auth Session
+      operationId: authResetPassword
+      summary: Reset password with token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - token
+              - email
+              - password
+              - password_confirmation
+              properties:
+                token:
+                  type: string
+                  example: reset-token-from-email
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                password:
+                  type: string
+                  format: password
+                  example: new-correct-horse-battery
+                password_confirmation:
+                  type: string
+                  format: password
+                  example: new-correct-horse-battery
+            example:
+              token: reset-token-from-email
+              email: ada@example.com
+              password: new-correct-horse-battery
+              password_confirmation: new-correct-horse-battery
+      responses:
+        200:
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Password reset successful.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Reset password with token. Tagged under **Auth Session**. See request/response schemas
+        below.
+  /api/v1/auth/email/verify:
+    post:
+      tags:
+      - Auth Email
+      operationId: authVerifyEmail
+      summary: Verify email
+      description: 'Either pass `token` from the email link (logs the user in), or pass a
+
+        6-digit `code` while already signed in.
+
+        '
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  example: email-verify-token
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  example: '123456'
+            examples:
+              by_token:
+                summary: From email link
+                value:
+                  token: email-verify-token
+              by_code:
+                summary: Signed-in 6-digit code
+                value:
+                  code: '123456'
+      responses:
+        200:
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/AuthPayload'
+                - type: object
+                  properties:
+                    message:
+                      type: string
+                      example: Email verified.
+              example:
+                message: Email verified.
+                user:
+                  id: 0198a1b2-c3d4-7000-8000-000000000001
+                  name: Ada Lovelace
+                  email: ada@example.com
+                  email_verified_at: '2026-08-01T10:05:00+00:00'
+                  theme_preference: system
+                  preferred_locale: en
+                  mfa_enabled: false
+                  organizations: []
+                csrf_token: xK9mZ2pQ…
+        422:
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/auth/email/resend-confirmation:
+    post:
+      tags:
+      - Auth Email
+      operationId: authResendConfirmation
+      summary: Resend email confirmation
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Confirmation email sent (or already verified)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  csrf_token:
+                    type: string
+              example:
+                message: Confirmation email sent.
+                csrf_token: xK9mZ2pQ…
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: Resend email confirmation. Tagged under **Auth Email**. See request/response schemas
+        below.
+  /api/v1/auth/mfa:
+    get:
+      tags:
+      - Auth MFA
+      operationId: authMfaStatus
+      summary: MFA status
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: MFA status for the signed-in user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaStatusResponse'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: MFA status. Tagged under **Auth MFA**. See request/response schemas below.
+  /api/v1/auth/mfa/setup:
+    post:
+      tags:
+      - Auth MFA
+      operationId: authMfaSetup
+      summary: Begin TOTP MFA setup
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Secret and otpauth URL for authenticator apps
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                    example: JBSWY3DPEHPK3PXP
+                  otpauth_url:
+                    type: string
+                    example: otpauth://totp/Azshrtr:ada@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Azshrtr
+                  qr_svg:
+                    type: string
+                    description: Inline SVG markup for the TOTP QR code
+              example:
+                secret: JBSWY3DPEHPK3PXP
+                otpauth_url: otpauth://totp/Azshrtr:ada@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Azshrtr
+                qr_svg: <svg xmlns="http://www.w3.org/2000/svg">…</svg>
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Begin TOTP MFA setup. Tagged under **Auth MFA**. See request/response schemas below.
+  /api/v1/auth/mfa/confirm:
+    post:
+      tags:
+      - Auth MFA
+      operationId: authMfaConfirm
+      summary: Confirm TOTP MFA setup
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              properties:
+                code:
+                  type: string
+                  example: '123456'
+            example:
+              code: '123456'
+      responses:
+        200:
+          description: MFA enabled; one-time recovery codes returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  recovery_codes:
+                    type: array
+                    items:
+                      type: string
+              example:
+                message: Authenticator MFA enabled.
+                recovery_codes:
+                - ABCD-EFGH
+                - IJKL-MNOP
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Confirm TOTP MFA setup. Tagged under **Auth MFA**. See request/response schemas below.
+  /api/v1/auth/mfa/disable:
+    post:
+      tags:
+      - Auth MFA
+      operationId: authMfaDisable
+      summary: Disable MFA
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              properties:
+                code:
+                  type: string
+                  description: TOTP or recovery code
+                  example: '123456'
+            example:
+              code: '123456'
+      responses:
+        200:
+          description: MFA disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Authenticator MFA disabled.
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Disable MFA. Tagged under **Auth MFA**. See request/response schemas below.
+  /api/v1/auth/mfa/recovery-codes:
+    post:
+      tags:
+      - Auth MFA
+      operationId: authMfaRegenRecovery
+      summary: Regenerate recovery codes
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              properties:
+                code:
+                  type: string
+                  example: '123456'
+            example:
+              code: '123456'
+      responses:
+        200:
+          description: New recovery codes (old ones invalidated)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  recovery_codes:
+                    type: array
+                    items:
+                      type: string
+              example:
+                message: Recovery codes regenerated.
+                recovery_codes:
+                - WXYZ-1234
+                - QRST-5678
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Regenerate recovery codes. Tagged under **Auth MFA**. See request/response schemas
+        below.
+  /api/v1/auth/mfa/challenge:
+    post:
+      tags:
+      - Auth MFA
+      operationId: authMfaChallenge
+      summary: Complete MFA during login
+      description: Completes a pending MFA login after password / email OTP / passkey.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - code
+              properties:
+                code:
+                  type: string
+                  description: TOTP or recovery code
+                  example: '123456'
+            example:
+              code: '123456'
+      responses:
+        200:
+          description: Signed in after MFA
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/AuthPayload'
+                - type: object
+                  properties:
+                    message:
+                      type: string
+                      example: Signed in.
+              example:
+                message: Signed in.
+                user:
+                  id: 0198a1b2-c3d4-7000-8000-000000000001
+                  name: Ada Lovelace
+                  email: ada@example.com
+                  email_verified_at: '2026-08-01T10:00:00+00:00'
+                  theme_preference: system
+                  preferred_locale: en
+                  mfa_enabled: true
+                  organizations: []
+                csrf_token: xK9mZ2pQ…
+        422:
+          $ref: '#/components/responses/Unprocessable'
+  /api/v1/auth/email-otp/send:
+    post:
+      tags:
+      - Auth Email OTP
+      operationId: authEmailOtpSend
+      summary: Send email OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                preferred_locale:
+                  type: string
+                  example: en
+            example:
+              email: ada@example.com
+      responses:
+        200:
+          description: Always OK (does not reveal whether the email exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: If an account exists for that email, a sign-in code was sent.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Send email OTP. Tagged under **Auth Email OTP**. See request/response schemas below.
+  /api/v1/auth/email-otp/verify:
+    post:
+      tags:
+      - Auth Email OTP
+      operationId: authEmailOtpVerify
+      summary: Verify email OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              - code
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: ada@example.com
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  example: '654321'
+            example:
+              email: ada@example.com
+              code: '654321'
+      responses:
+        200:
+          description: Signed in, or MFA challenge required
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/AuthPayload'
+                - $ref: '#/components/schemas/MfaRequiredResponse'
+              examples:
+                signed_in:
+                  summary: OTP accepted
+                  value:
+                    user:
+                      id: 0198a1b2-c3d4-7000-8000-000000000001
+                      name: Ada Lovelace
+                      email: ada@example.com
+                      email_verified_at: '2026-08-01T10:00:00+00:00'
+                      theme_preference: system
+                      preferred_locale: en
+                      mfa_enabled: false
+                      organizations: []
+                    csrf_token: xK9mZ2pQ…
+                mfa_required:
+                  summary: MFA still required
+                  value:
+                    mfa_required: true
+                    message: Enter your authenticator or recovery code to continue.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Verify email OTP. Tagged under **Auth Email OTP**. See request/response schemas below.
+  /api/v1/auth/passkeys:
+    get:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeysList
+      summary: List passkeys
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Passkeys for the signed-in user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passkeys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                          example: MacBook Touch ID
+                        credential_id:
+                          type: string
+                        last_used_at:
+                          type:
+                          - string
+                          - 'null'
+                          format: date-time
+                        created_at:
+                          type: string
+                          format: date-time
+              example:
+                passkeys:
+                - id: 0198a1b2-c3d4-7000-8000-0000000000bb
+                  name: MacBook Touch ID
+                  credential_id: base64url-credential-id
+                  last_used_at: '2026-08-01T09:00:00+00:00'
+                  created_at: '2026-07-01T12:00:00+00:00'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: List passkeys. Tagged under **Auth Passkeys**. See request/response schemas below.
+  /api/v1/auth/passkeys/register/options:
+    post:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeyRegisterOptions
+      summary: WebAuthn registration options
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: PublicKeyCredentialCreationOptions for navigator.credentials.create
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                challenge: base64url-challenge
+                rp:
+                  name: Azshrtr
+                  id: azshrtr.com
+                user:
+                  id: base64url-user-handle
+                  name: ada@example.com
+                  displayName: Ada Lovelace
+                pubKeyCredParams:
+                - type: public-key
+                  alg: -7
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: WebAuthn registration options. Tagged under **Auth Passkeys**. See request/response
+        schemas below.
+  /api/v1/auth/passkeys/register:
+    post:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeyRegister
+      summary: Finish passkey registration
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - credential
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                  example: MacBook Touch ID
+                credential:
+                  type: object
+                  required:
+                  - id
+                  - rawId
+                  - type
+                  - response
+                  properties:
+                    id:
+                      type: string
+                    rawId:
+                      type: string
+                    type:
+                      type: string
+                      example: public-key
+                    response:
+                      type: object
+                      additionalProperties: true
+            example:
+              name: MacBook Touch ID
+              credential:
+                id: credential-id
+                rawId: credential-raw-id
+                type: public-key
+                response:
+                  clientDataJSON: …
+                  attestationObject: …
+      responses:
+        201:
+          description: Passkey registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passkey:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+              example:
+                passkey:
+                  id: 0198a1b2-c3d4-7000-8000-0000000000bb
+                  name: MacBook Touch ID
+                  created_at: '2026-08-01T12:00:00+00:00'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Finish passkey registration. Tagged under **Auth Passkeys**. See request/response schemas
+        below.
+  /api/v1/auth/passkeys/login/options:
+    post:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeyLoginOptions
+      summary: WebAuthn login options
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type:
+                  - string
+                  - 'null'
+                  format: email
+                  example: ada@example.com
+            example:
+              email: ada@example.com
+      responses:
+        200:
+          description: PublicKeyCredentialRequestOptions for navigator.credentials.get
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                challenge: base64url-challenge
+                rpId: azshrtr.com
+                allowCredentials:
+                - type: public-key
+                  id: base64url-credential-id
+      description: WebAuthn login options. Tagged under **Auth Passkeys**. See request/response schemas
+        below.
+  /api/v1/auth/passkeys/login/verify:
+    post:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeyLoginVerify
+      summary: Finish passkey login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - credential
+              properties:
+                credential:
+                  type: object
+                  required:
+                  - id
+                  - rawId
+                  - type
+                  - response
+                  properties:
+                    id:
+                      type: string
+                    rawId:
+                      type: string
+                    type:
+                      type: string
+                      example: public-key
+                    response:
+                      type: object
+                      additionalProperties: true
+            example:
+              credential:
+                id: credential-id
+                rawId: credential-raw-id
+                type: public-key
+                response:
+                  clientDataJSON: …
+                  authenticatorData: …
+                  signature: …
+                  userHandle: …
+      responses:
+        200:
+          description: Signed in, or MFA challenge required
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/AuthPayload'
+                - $ref: '#/components/schemas/MfaRequiredResponse'
+              examples:
+                signed_in:
+                  summary: Passkey accepted
+                  value:
+                    user:
+                      id: 0198a1b2-c3d4-7000-8000-000000000001
+                      name: Ada Lovelace
+                      email: ada@example.com
+                      email_verified_at: '2026-08-01T10:00:00+00:00'
+                      theme_preference: system
+                      preferred_locale: en
+                      mfa_enabled: false
+                      organizations: []
+                    csrf_token: xK9mZ2pQ…
+                mfa_required:
+                  summary: MFA still required
+                  value:
+                    mfa_required: true
+                    message: Enter your authenticator or recovery code to continue.
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Finish passkey login. Tagged under **Auth Passkeys**. See request/response schemas
+        below.
+  /api/v1/auth/passkeys/{passkeyId}:
+    delete:
+      tags:
+      - Auth Passkeys
+      operationId: authPasskeyDelete
+      summary: Delete a passkey
+      security:
+      - ConsoleSession: []
+      parameters:
+      - name: passkeyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+              example:
+                ok: true
+        401:
+          $ref: '#/components/responses/Unauthorized'
+      description: Delete a passkey. Tagged under **Auth Passkeys**. See request/response schemas below.
+  /api/v1/links/claim:
+    post:
+      tags:
+      - Product Links
+      operationId: claimAnonymousLink
+      summary: Claim an anonymous homepage link
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - token
+              - organization_id
+              properties:
+                token:
+                  type: string
+                organization_id:
+                  type: string
+                  format: uuid
+      responses:
+        200:
+          description: Claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+      description: Claim an anonymous homepage link. Tagged under **Product Links**. See request/response
+        schemas below.
+  /api/v1/organizations:
+    get:
+      tags:
+      - Organizations
+      operationId: listOrganizations
+      summary: List organizations
+      security:
+      - ConsoleSession: []
+      responses:
+        200:
+          description: Organizations
+      description: List organizations. Tagged under **Organizations**. See request/response schemas below.
+    post:
+      tags:
+      - Organizations
+      operationId: createOrganization
+      summary: Create a workspace
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+      responses:
+        201:
+          description: Created
+      description: Create a workspace. Tagged under **Organizations**. See request/response schemas below.
+  /api/v1/invitations/accept:
+    post:
+      tags:
+      - Members
+      operationId: acceptInvitation
+      summary: Accept a member invitation
+      security:
+      - ConsoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - token
+              properties:
+                token:
+                  type: string
+      responses:
+        200:
+          description: Joined
+      description: Accept a member invitation. Tagged under **Members**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/overview:
+    get:
+      tags:
+      - Analytics
+      operationId: orgOverview
+      summary: Dashboard overview
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: Dashboard overview.'
+      description: Dashboard overview. Tagged under **Analytics**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/analytics:
+    get:
+      tags:
+      - Analytics
+      operationId: orgAnalytics
+      summary: Click analytics series
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: Click analytics series.'
+      description: Click analytics series. Tagged under **Analytics**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/links:
+    get:
+      tags:
+      - Console Links
+      operationId: consoleListLinks
+      summary: List organization links
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List organization links.'
+      description: List organization links. Tagged under **Console Links**. See request/response schemas
+        below.
+    post:
+      tags:
+      - Console Links
+      operationId: consoleCreateLink
+      summary: Create a link
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkCreate'
+      responses:
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+      description: Create a link. Tagged under **Console Links**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/links/export:
+    get:
+      tags:
+      - Import Export
+      operationId: consoleExportLinks
+      summary: Export links
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export links.'
+      description: Export links. Tagged under **Import Export**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/qr:
+    get:
+      tags:
+      - QR Codes
+      operationId: consoleListQr
+      summary: List QR codes
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List QR codes.'
+      description: List QR codes. Tagged under **QR Codes**. See request/response schemas below.
+    post:
+      tags:
+      - QR Codes
+      operationId: consoleCreateQr
+      summary: Create a QR code
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                link_id:
+                  type: string
+                  format: uuid
+                content:
+                  type: string
+                size:
+                  type: integer
+      responses:
+        201:
+          description: Created
+      description: Create a QR code. Tagged under **QR Codes**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/qr/export:
+    get:
+      tags:
+      - QR Codes
+      operationId: consoleExportQr
+      summary: Export QR codes
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export QR codes.'
+      description: Export QR codes. Tagged under **QR Codes**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/domains:
+    get:
+      tags:
+      - Domains
+      operationId: consoleListDomains
+      summary: List custom domains
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List custom domains.'
+      description: List custom domains. Tagged under **Domains**. See request/response schemas below.
+    post:
+      tags:
+      - Domains
+      operationId: consoleCreateDomain
+      summary: Add a custom domain
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - hostname
+              properties:
+                hostname:
+                  type: string
+      responses:
+        201:
+          description: Created
+      description: Add a custom domain. Tagged under **Domains**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/domains/export:
+    get:
+      tags:
+      - Domains
+      operationId: consoleExportDomains
+      summary: Export domains
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export domains.'
+      description: Export domains. Tagged under **Domains**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/api-keys:
+    get:
+      tags:
+      - API Keys
+      operationId: consoleListApiKeys
+      summary: List API keys
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List API keys.'
+      description: List API keys. Tagged under **API Keys**. See request/response schemas below.
+    post:
+      tags:
+      - API Keys
+      operationId: consoleCreateApiKey
+      summary: Create an API key (plain text returned once)
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        201:
+          description: Created with plain_text
+      description: Create an API key (plain text returned once). Tagged under **API Keys**. See request/response
+        schemas below.
+  /api/v1/organizations/{organizationId}/api-keys/export:
+    get:
+      tags:
+      - API Keys
+      operationId: consoleExportApiKeys
+      summary: Export API keys metadata
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export API keys metadata.'
+      description: Export API keys metadata. Tagged under **API Keys**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/members:
+    get:
+      tags:
+      - Members
+      operationId: consoleListMembers
+      summary: List members and invitations
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List members and invitations.'
+      description: List members and invitations. Tagged under **Members**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/members/export:
+    get:
+      tags:
+      - Members
+      operationId: consoleExportMembers
+      summary: Export members
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export members.'
+      description: Export members. Tagged under **Members**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/api-request-logs:
+    get:
+      tags:
+      - API Logs
+      operationId: consoleListApiRequestLogs
+      summary: List product API request logs
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List product API request logs.'
+      description: List product API request logs. Tagged under **API Logs**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/api-request-logs/export:
+    get:
+      tags:
+      - API Logs
+      operationId: consoleExportApiRequestLogs
+      summary: Export API request logs
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export API request logs.'
+      description: Export API request logs. Tagged under **API Logs**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/audit-logs:
+    get:
+      tags:
+      - Audit Logs
+      operationId: consoleListAuditLogs
+      summary: List audit logs
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: List audit logs.'
+      description: List audit logs. Tagged under **Audit Logs**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/audit-logs/export:
+    get:
+      tags:
+      - Audit Logs
+      operationId: consoleExportAuditLogs
+      summary: Export audit logs
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        200:
+          description: 'Successful response for: Export audit logs.'
+      description: Export audit logs. Tagged under **Audit Logs**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/billing:
+    get:
+      tags:
+      - Billing
+      operationId: consoleBillingShow
+      summary: Current plan and subscription
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: 'Successful response for: Current plan and subscription.'
+      description: Current plan and subscription. Tagged under **Billing**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/links/bulk-delete:
+    post:
+      tags:
+      - Console Links
+      operationId: consoleBulkDeleteLinks
+      summary: Delete many links
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDelete'
+      responses:
+        200:
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeleteResult'
+      description: Delete many links. Tagged under **Console Links**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/links/{linkId}:
+    get:
+      tags:
+      - Console Links
+      operationId: consoleShowLink
+      summary: Show a link
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConsoleLinkId'
+      responses:
+        200:
+          description: Link
+      description: Show a link. Tagged under **Console Links**. See request/response schemas below.
+    patch:
+      tags:
+      - Console Links
+      operationId: consoleUpdateLink
+      summary: Update a link
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConsoleLinkId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkUpdate'
+      responses:
+        200:
+          description: Updated
+      description: Update a link. Tagged under **Console Links**. See request/response schemas below.
+    delete:
+      tags:
+      - Console Links
+      operationId: consoleDeleteLink
+      summary: Delete a link
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConsoleLinkId'
+      responses:
+        200:
+          description: Deleted
+      description: Delete a link. Tagged under **Console Links**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/links/{linkId}/qr.svg:
+    get:
+      tags:
+      - QR Codes
+      operationId: consoleLinkQrSvg
+      summary: Download SVG QR for a link
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ConsoleLinkId'
+      responses:
+        200:
+          description: SVG image
+      description: Download SVG QR for a link. Tagged under **QR Codes**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/qr/bulk-delete:
+    post:
+      tags:
+      - QR Codes
+      operationId: consoleBulkDeleteQr
+      summary: Delete many QR codes
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDelete'
+      responses:
+        200:
+          description: Deleted
+      description: Delete many QR codes. Tagged under **QR Codes**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/qr/{qrId}:
+    get:
+      tags:
+      - QR Codes
+      operationId: consoleShowQr
+      summary: Show QR + SVG
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: qrId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: QR detail
+      description: Show QR + SVG. Tagged under **QR Codes**. See request/response schemas below.
+    delete:
+      tags:
+      - QR Codes
+      operationId: consoleDeleteQr
+      summary: Delete a QR code
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: qrId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Deleted
+      description: Delete a QR code. Tagged under **QR Codes**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/qr/{qrId}/download:
+    get:
+      tags:
+      - QR Codes
+      operationId: consoleDownloadQr
+      summary: Download QR SVG
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: qrId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: SVG
+      description: Download QR SVG. Tagged under **QR Codes**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/domains/bulk-delete:
+    post:
+      tags:
+      - Domains
+      operationId: consoleBulkDeleteDomains
+      summary: Delete many domains
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDelete'
+      responses:
+        200:
+          description: Deleted
+      description: Delete many domains. Tagged under **Domains**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/domains/{domainId}:
+    get:
+      tags:
+      - Domains
+      operationId: consoleShowDomain
+      summary: Show domain + DNS records
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: domainId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Domain
+      description: Show domain + DNS records. Tagged under **Domains**. See request/response schemas below.
+    delete:
+      tags:
+      - Domains
+      operationId: consoleDeleteDomain
+      summary: Delete a domain
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: domainId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Deleted
+      description: Delete a domain. Tagged under **Domains**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/domains/{domainId}/verify:
+    post:
+      tags:
+      - Domains
+      operationId: consoleVerifyDomain
+      summary: Verify domain DNS
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: domainId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Verified
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Verify domain DNS. Tagged under **Domains**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/api-keys/bulk-delete:
+    post:
+      tags:
+      - API Keys
+      operationId: consoleBulkDeleteApiKeys
+      summary: Revoke many API keys
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDelete'
+      responses:
+        200:
+          description: Revoked
+      description: Revoke many API keys. Tagged under **API Keys**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/api-keys/{apiKeyId}:
+    get:
+      tags:
+      - API Keys
+      operationId: consoleShowApiKey
+      summary: Show an API key
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: apiKeyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Key metadata
+      description: Show an API key. Tagged under **API Keys**. See request/response schemas below.
+    delete:
+      tags:
+      - API Keys
+      operationId: consoleRevokeApiKey
+      summary: Revoke an API key
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: apiKeyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Revoked
+      description: Revoke an API key. Tagged under **API Keys**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/members/invite:
+    post:
+      tags:
+      - Members
+      operationId: consoleInviteMember
+      summary: Invite a member by email
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - email
+              - role
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum:
+                  - admin
+                  - member
+      responses:
+        201:
+          description: Invitation created
+      description: Invite a member by email. Tagged under **Members**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/members/bulk-delete:
+    post:
+      tags:
+      - Members
+      operationId: consoleBulkDeleteMembers
+      summary: Remove many members
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDelete'
+      responses:
+        200:
+          description: Removed
+      description: Remove many members. Tagged under **Members**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/members/{memberId}:
+    get:
+      tags:
+      - Members
+      operationId: consoleShowMember
+      summary: Show a member
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: memberId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Member
+      description: Show a member. Tagged under **Members**. See request/response schemas below.
+    patch:
+      tags:
+      - Members
+      operationId: consoleUpdateMemberRole
+      summary: Update member role
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: memberId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - role
+              properties:
+                role:
+                  type: string
+                  enum:
+                  - admin
+                  - member
+      responses:
+        200:
+          description: Updated
+      description: Update member role. Tagged under **Members**. See request/response schemas below.
+    delete:
+      tags:
+      - Members
+      operationId: consoleRemoveMember
+      summary: Remove a member
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: memberId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Removed
+      description: Remove a member. Tagged under **Members**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/invitations/{invitationId}:
+    delete:
+      tags:
+      - Members
+      operationId: consoleRevokeInvitation
+      summary: Revoke a pending invitation
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: invitationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: Revoked
+      description: Revoke a pending invitation. Tagged under **Members**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/api-request-logs/{logId}:
+    get:
+      tags:
+      - API Logs
+      operationId: consoleShowApiRequestLog
+      summary: Show an API request log
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: logId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        200:
+          description: Log
+      description: Show an API request log. Tagged under **API Logs**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/audit-logs/{logId}:
+    get:
+      tags:
+      - Audit Logs
+      operationId: consoleShowAuditLog
+      summary: Show an audit log entry
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: logId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        200:
+          description: Log
+      description: Show an audit log entry. Tagged under **Audit Logs**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/billing/invoices:
+    get:
+      tags:
+      - Billing
+      operationId: consoleBillingInvoices
+      summary: List past invoices from Dodo
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      responses:
+        200:
+          description: Paginated invoices
+      description: List past invoices from Dodo. Tagged under **Billing**. See request/response schemas
+        below.
+  /api/v1/organizations/{organizationId}/billing/checkout:
+    post:
+      tags:
+      - Billing
+      operationId: consoleBillingCheckout
+      summary: Start Pro checkout (Dodo)
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: Checkout session
+        422:
+          $ref: '#/components/responses/Unprocessable'
+      description: Start Pro checkout (Dodo). Tagged under **Billing**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/billing/cancel:
+    post:
+      tags:
+      - Billing
+      operationId: consoleBillingCancel
+      summary: Schedule Pro downgrade at period end
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: Scheduled
+      description: Schedule Pro downgrade at period end. Tagged under **Billing**. See request/response
+        schemas below.
+  /api/v1/organizations/{organizationId}/billing/resume:
+    post:
+      tags:
+      - Billing
+      operationId: consoleBillingResume
+      summary: Resume Pro
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      responses:
+        200:
+          description: Resumed
+      description: Resume Pro. Tagged under **Billing**. See request/response schemas below.
+  /api/v1/organizations/{organizationId}/export:
+    post:
+      tags:
+      - Import Export
+      operationId: consoleExportLinksJob
+      summary: Create a link export
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                  enum:
+                  - json
+                  - csv
+      responses:
+        200:
+          description: Export ready
+      description: |
+        Create a link export written in chunks (no full in-memory model dump).
+        Tagged under **Import Export**.
+  /api/v1/organizations/{organizationId}/exports/{exportId}/download:
+    get:
+      tags:
+      - Import Export
+      operationId: consoleDownloadExport
+      summary: Download a completed export file
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - name: exportId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        200:
+          description: File download
+      description: Download a completed export file. Tagged under **Import Export**. See request/response
+        schemas below.
+  /api/v1/organizations/{organizationId}/import:
+    post:
+      tags:
+      - Import Export
+      operationId: consoleImportLinks
+      summary: Import links from JSON or CSV payload
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - format
+              - payload
+              properties:
+                format:
+                  type: string
+                  enum:
+                  - json
+                  - csv
+                payload:
+                  type: string
+                  description: Raw JSON array or CSV text. Max 5MB and 10,000 rows per request (configurable).
+      responses:
+        200:
+          description: Import result
+        413:
+          description: Request body exceeds PHP/nginx limits
+        422:
+          description: Payload too large, too many rows, or invalid format
+      description: |
+        Import links from JSON or CSV. Streaming export is used on the matching export endpoint.
+        Limits default to 5MB payload and 10,000 rows; keep under `post_max_size` (Docker 12M).
+        Tagged under **Import Export**.
+  /api/v1/organizations/{organizationId}/billing/checkout-return:
+    post:
+      tags:
+      - Billing
+      operationId: consoleBillingCheckoutReturn
+      summary: Record checkout return status
+      description: Called by the console after the browser returns from Dodo checkout. Never grants Pro
+        by itself — only records failed/cancelled returns for audit/email. Pro is applied only from verified
+        webhooks.
+      security:
+      - ConsoleSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  example: failed
+                subscription_id:
+                  type: string
+                  nullable: true
+            example:
+              status: failed
+              subscription_id: null
+      responses:
+        '200':
+          description: Return acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+              example:
+                ok: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+x-tagGroups:
+- name: Platform
+  tags:
+  - Health
+  - Webhooks
+- name: Product API (Bearer key)
+  tags:
+  - Product Me
+  - Product Links
+- name: Auth
+  tags:
+  - Auth Session
+  - Auth MFA
+  - Auth Email OTP
+  - Auth Passkeys
+  - Auth Email
+- name: Workspace
+  tags:
+  - Organizations
+  - Members
+  - Billing
+- name: Links & QR
+  tags:
+  - Console Links
+  - QR Codes
+  - Domains
+  - Import Export
+- name: Developer
+  tags:
+  - API Keys
+  - API Logs
+  - Analytics
+  - Audit Logs
