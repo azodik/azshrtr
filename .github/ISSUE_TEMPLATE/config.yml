@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security report
+  - name: Security vulnerability
     url: https://azodik.com
-    about: Please report security issues privately — see SECURITY.md
+    about: Report security issues privately — do not open a public issue.
+  - name: Documentation
+    url: https://github.com/azodik/azshrtr#readme
+    about: Setup, Docker, and self-hosting docs in the README.

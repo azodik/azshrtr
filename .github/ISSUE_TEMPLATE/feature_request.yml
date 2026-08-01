@@ -13,10 +13,13 @@ body:
     id: proposal
     attributes:
       label: Proposal
-      description: How should it work?
+      description: What would you like to change or add?
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
+      description: Optional — other approaches you thought about.
+    validations:
+      required: false

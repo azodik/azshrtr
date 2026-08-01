@@ -72,3 +72,107 @@ jobs:
 
       - name: Unit & integration tests
         run: composer test
+
+  # When VERSION is bumped on main, tag vX.Y.Z.
+  # Main merges publish to GHCR unless the push is changelog/docs-only (no new build).
+  # GitHub Release is created only on version bump / first commit.
+  tag-release:
+    name: Tag version bump
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version_bumped: ${{ steps.tag.outputs.version_bumped }}
+      should_publish: ${{ steps.tag.outputs.should_publish }}
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create tag when VERSION changed
+        id: tag
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::VERSION must be semver (got: $VERSION)"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          VERSION_BUMPED=false
+          SHOULD_PUBLISH=true
+
+          if ! git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            # Initial / orphan commit — treat as a release.
+            VERSION_BUMPED=true
+          else
+            CHANGED="$(git diff --name-only HEAD~1 HEAD)"
+            if echo "$CHANGED" | grep -qx VERSION; then
+              VERSION_BUMPED=true
+            else
+              echo "VERSION unchanged."
+            fi
+
+            # Skip multi-arch GHCR publish when nothing that ships in the image changed
+            # (changelog, CI, markdown, license, etc.).
+            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -Evq \
+              -e '^\.github/' \
+              -e '^CHANGELOG\.md$' \
+              -e '^README\.md$' \
+              -e '^LICENSE' \
+              -e '^CODE_OF_CONDUCT\.md$' \
+              -e '^SECURITY\.md$' \
+              -e '^CONTRIBUTING\.md$' \
+              -e '^\.gitignore$' \
+              -e '^\.editorconfig$' \
+              -e '^\.gitattributes$'
+            then
+              SHOULD_PUBLISH=false
+              echo "Skipping GHCR publish — no image-affecting files changed."
+            fi
+          fi
+
+          if [ "$VERSION_BUMPED" = "true" ]; then
+            SHOULD_PUBLISH=true
+            git fetch --tags --force
+
+            if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "Tag ${TAG} already exists — skipping create."
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git tag -a "${TAG}" -m "Azshrtr ${TAG}"
+              git push origin "refs/tags/${TAG}"
+              echo "Created and pushed ${TAG}"
+            fi
+          fi
+
+          {
+            echo "version_bumped=${VERSION_BUMPED}"
+            echo "should_publish=${SHOULD_PUBLISH}"
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Publish release
+    needs: tag-release
+    if: needs.tag-release.outputs.should_publish == 'true'
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+      actions: read
+    uses: ./.github/workflows/ghcr-publish.yml
+    with:
+      tag: ${{ needs.tag-release.outputs.tag }}
+      publish_ghcr: true
+      create_github_release: ${{ needs.tag-release.outputs.version_bumped == 'true' }}
+    secrets: inherit

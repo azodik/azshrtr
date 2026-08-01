@@ -92,7 +92,25 @@ docker compose up --build
 
 App: [http://localhost:8080](http://localhost:8080) · MariaDB on host port `3307` · Redis on `6381`.
 
+**Test a published GHCR image** (no local build):
+
+```bash
+export APP_KEY=base64:$(openssl rand -base64 32)
+# optional: AZSHRTR_TAG=0.0.1
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+```
+
 The runtime image is Alpine-based (`php:8.5-fpm-alpine` + nginx) and runs php-fpm, nginx, the queue worker, and the scheduler.
+
+Release builds **Linux** multi-arch images only (`linux/amd64` + `linux/arm64`):
+
+| Host | Image |
+|------|--------|
+| Linux x86_64 / Windows Docker Desktop / Intel Mac | `linux/amd64` |
+| Apple Silicon Mac / Linux arm64 | `linux/arm64` |
+
+There is no native Windows container image (PHP/nginx stack runs as Linux containers on Docker Desktop/WSL2). Published images ship on version tags (see **Version & releases** below).
 
 ### Shared hosting
 
@@ -214,9 +232,36 @@ php artisan db:seed --class=ConsoleDemoSeeder
 npm run demo:capture
 ```
 
-## Versioning
+## Version & releases
 
-SemVer lives in [`VERSION`](VERSION) (mirrored in `package.json`). See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Azshrtr uses **SemVer + build number**. Version describes the release; build uniquely identifies the artifact.
+
+| Field | Example | Source of truth |
+|-------|---------|-----------------|
+| Version | `0.0.1` | [`VERSION`](VERSION) (keep `package.json` in sync for tooling; CI fails if they differ) |
+| Build | `12` | CI (`Publish` workflow `run_number` + optional `AZSHRTR_BUILD_OFFSET`) — never resets for that workflow |
+| Commit | `eb21725` | Git SHA baked at image build |
+| Git tag / Release | `v0.0.1` / `Azshrtr 0.0.1` | Created when `VERSION` is bumped on `main` |
+| Docker | `:0.0.1` | [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) `ghcr.io/<owner>/<repo>` |
+
+`composer.json` has **no** version field. Do not treat `package.json` as the deployed build identity.
+
+| Event | What runs |
+|-------|-----------|
+| PR | Quality (Pint, typecheck, Biome, PHPUnit) |
+| Merge to `main` | Quality → multi-arch push to GHCR (`:version`) — skipped when only CI/docs/changelog change |
+| Bump `VERSION` (+ `package.json`) on `main` | Above + git tag `vX.Y.Z` + GitHub Release `Azshrtr X.Y.Z` (Docker archives) + changelog PR |
+| Push tag `vX.Y.Z` | Same Publish workflow |
+
+**Changelog:** each SemVer GitHub Release gets auto-generated notes (from PRs/commits). The Publish workflow also regenerates [`CHANGELOG.md`](CHANGELOG.md) with [git-cliff](https://git-cliff.org) and opens a PR to merge it into `main`. Prefer [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, …) so sections group cleanly.
+
+```bash
+docker pull ghcr.io/azodik/azshrtr:0.0.1
+```
+
+No GCP secrets. CI uses `GITHUB_TOKEN` with `packages: write`. After the first push, set the package visibility (public/private) under the repo’s **Packages** settings if needed. Optional repo variable `AZSHRTR_BUILD_OFFSET` starts the counter higher (e.g. `200` → first Publish run becomes build `201`).
+
+Local / Herd builds show SemVer from `VERSION` and build `1` / `dev` unless you set `AZSHRTR_VERSION` / `AZSHRTR_BUILD` / `AZSHRTR_COMMIT`. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Docs & support
 
